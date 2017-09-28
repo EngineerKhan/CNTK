@@ -5197,7 +5197,7 @@ __global__ void _DropFrame(
     for (long i = 0; i < m_numRows; ++i)
     {
         int idx = IDX2C(i, col_id, m_numRows);
-        // printf("%u ", denseIndex);
+        // printf("%u ", idx);
         if (fabs(label[idx] - 1.0) < 0.1) // we found the 1 in the vector
         {
             if (gamma[idx] < framedropthreshhold)

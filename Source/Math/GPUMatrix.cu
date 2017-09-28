@@ -28,7 +28,6 @@
 #include "Convolution.cuh"
 #include "CuDnnRNN.h"
 
-
 #pragma comment(lib, "cudart.lib") // instruct linker to reference these libs
 #pragma comment(lib, "cublas.lib")
 #pragma comment(lib, "cusparse.lib")

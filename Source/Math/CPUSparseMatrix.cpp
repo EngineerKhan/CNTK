@@ -1424,8 +1424,6 @@ ElemType CPUSparseMatrix<ElemType>::Adagrad(CPUMatrix<ElemType>& c, const bool n
 template <class ElemType>
 void CPUSparseMatrix<ElemType>::AdaDelta(CPUMatrix<ElemType>& c, CPUMatrix<ElemType>& functionValues, ElemType learningRate, ElemType rho, ElemType epsilon, int* timestamps, int currentTimestamp)
 {
-    (void)currentTimestamp;
-    (void)timestamps;
     size_t numColsNeeded = 2 * GetNumCols();
 
     if (c.IsEmpty() || (c.GetNumCols() < numColsNeeded))

@@ -51,14 +51,13 @@ MOMENTUM_SCHEDULE_PARAMS = [
         
 LEARNER_LAMBDAS = [
     lambda params: C.adadelta(params),
-#    lambda params: C.adagrad(params, lr=learning_rate_schedule(1, UnitType.minibatch)),
+    lambda params: C.adagrad(params, lr=learning_rate_schedule(1, UnitType.minibatch)),
     lambda params: C.adam(params, lr=learning_rate_schedule(1, UnitType.minibatch), momentum=C.momentum_schedule(0.9)),
     lambda params: C.fsadagrad(params, lr=learning_rate_schedule(1, UnitType.minibatch), momentum=C.momentum_schedule(0.9)),
-#    lambda params: C.nesterov(params, lr=learning_rate_schedule(1, UnitType.minibatch), momentum=C.momentum_schedule(0.9)),
+    lambda params: C.nesterov(params, lr=learning_rate_schedule(1, UnitType.minibatch), momentum=C.momentum_schedule(0.9)),
     lambda params: C.rmsprop(params, lr=learning_rate_schedule(1, UnitType.minibatch), gamma=0.1, inc=3.0, dec=0.1, max=np.inf, min=1e-8),
     lambda params: C.sgd(params, lr=learning_rate_schedule(1, UnitType.minibatch)),
-#    lambda params: C.momentum_sgd(params, lr=learning_rate_schedule(1, UnitType.minibatch), momentum=C.momentum_schedule(0.9))
-    ]
+    lambda params: C.momentum_sgd(params, lr=learning_rate_schedule(1, UnitType.minibatch), momentum=C.momentum_schedule(0.9))]
 
 @pytest.mark.parametrize("params, expectation, minibatch_size", LR_SCHEDULE_PARAMS_LEGACY)
 def test_learning_rate_schedule(params, expectation, minibatch_size):
