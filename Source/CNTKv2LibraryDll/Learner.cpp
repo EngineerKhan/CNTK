@@ -315,7 +315,7 @@ namespace CNTK
 
     template <typename ElementType>
     void LearnerBase::Update(const Parameter& parameter, const NDArrayViewPtr& gradientValue, 
-                             const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount) const
+                             const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount)
     {
         const auto& parameterValue = parameter.Value();
         PreProcess<ElementType>(parameterValue, gradientValue, trainingSampleCount);
@@ -470,7 +470,7 @@ namespace CNTK
     }
 
     /*virtual*/ void LearnerSGD::Update(const Parameter& parameter, const NDArrayViewPtr& gradientValue, 
-                                        const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount) const /*override*/
+                                        const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount) /*override*/
     {
         DISPATCH_TO_TYPED_UPDATE_FUNCTION;
     }
@@ -498,7 +498,7 @@ namespace CNTK
     }
 
     /*virtual*/ void LearnerMomentumSGD::Update(const Parameter& parameter, const NDArrayViewPtr& gradientValue, 
-                                                const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount) const /*override*/
+                                                const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount) /*override*/
     {
         ReportTrainingParameterValue(m_momentumSchedule, L"Momentum");
 
@@ -544,7 +544,7 @@ namespace CNTK
     }
 
     /*virtual*/ void LearnerNesterov::Update(const Parameter& parameter, const NDArrayViewPtr& gradientValue, 
-                                             const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount) const /*override*/
+                                             const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount) /*override*/
     {
         DISPATCH_TO_TYPED_UPDATE_FUNCTION;
     }
@@ -587,7 +587,7 @@ namespace CNTK
     }
 
     /*virtual*/ void LearnerAdaGrad::Update(const Parameter& parameter, const NDArrayViewPtr& gradientValue, 
-                                            const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount) const /*override*/
+                                            const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount) /*override*/
     {
         DISPATCH_TO_TYPED_UPDATE_FUNCTION;
     }
@@ -621,20 +621,92 @@ namespace CNTK
     }
 
     /*virtual*/ void LearnerAdaDelta::Update(const Parameter& parameter, const NDArrayViewPtr& gradientValue,
-        const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount) const /*override*/
+        const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount) /*override*/
     {
         DISPATCH_TO_TYPED_UPDATE_FUNCTION;
     }
 
+    /* static */ const int LearnerAdaDelta::s_SyncInterval = 1 << 20;
+
     template <typename ElementType>
     void LearnerAdaDelta::Update(const Parameter& parameter, const NDArrayViewPtr& gradientValue,
-        const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount) const
+        const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount)
     {
         GET_WRITABLE_MATRICES
 
         const auto learningRate = LearningRate(trainingSampleCount);
 
-        smoothedGradientMatrix->AdaDeltaUpdate(*gradientMatrix, *parameterMatrix, (ElementType)learningRate, (ElementType)m_rho, (ElementType)m_epsilon);
+        int* timestamps = nullptr;
+        int currentTimestamp = 0;
+        if (gradientValue->IsSparse())
+        {
+            const auto numCols = gradientMatrix->GetNumCols();
+            const auto search = m_lastUpdateTime.find(parameter);
+            if (search == m_lastUpdateTime.end())
+            {
+                // NDArrayView only supports Float and Double and the following assert prevents surprises in non-standard platforms
+                static_assert(sizeof(int) <= sizeof(float), "Buffer for timestamps is not big enough on this platform");
+                const auto view = MakeSharedObject<NDArrayView>(float(0.0), NDShape({ numCols }), gradientValue->Device());
+                const auto itBoolPair = m_lastUpdateTime.emplace(make_pair(parameter, view));
+                assert(itBoolPair->second); // insertion took place
+                timestamps = reinterpret_cast<int*>(const_cast<float*>(itBoolPair.first->second->DataBuffer<float>()));
+                m_currentTime[parameter] = 0;
+            }
+            else
+            {
+                timestamps = reinterpret_cast<int*>(const_cast<float*>(search->second->DataBuffer<float>()));
+                currentTimestamp = m_currentTime[parameter];
+            }
+            if (currentTimestamp >= LearnerAdaDelta::s_SyncInterval)
+            {
+                smoothedGradientMatrix->AdaDeltaFlushState(numCols, (ElementType)m_rho, timestamps, currentTimestamp);
+                m_currentTime[parameter] = currentTimestamp = 0;
+            }
+            currentTimestamp += 1;
+            m_currentTime[parameter] = currentTimestamp;
+        }
+
+        smoothedGradientMatrix->AdaDeltaUpdate(*gradientMatrix, *parameterMatrix, (ElementType)learningRate, (ElementType)m_rho, (ElementType)m_epsilon, timestamps, currentTimestamp);
+    }
+
+    /*virtual*/ Dictionary LearnerAdaDelta::CreateCheckpoint() /*override*/
+    {
+        for (const auto& parameter : Parameters())
+        {
+            const auto search = m_lastUpdateTime.find(parameter);
+            if (search == m_lastUpdateTime.end())
+                continue;
+            int* timestamps = reinterpret_cast<int*>(const_cast<float*>(search->second->DataBuffer<float>()));
+            int currentTimestamp = m_currentTime[parameter];
+            const auto& smoothedGradientValue = m_smoothedGradientValues.at(parameter);
+            if (parameter.GetDataType() == CNTK::DataType::Float)
+            {
+                const auto numCols = GetMatrix<float>(parameter.Value())->GetNumCols();
+                const auto& smoothedGradientMatrix = GetWritableMatrix<float>(smoothedGradientValue);
+                smoothedGradientMatrix->AdaDeltaFlushState(numCols, (float)m_rho, timestamps, currentTimestamp);
+            }
+            else
+            {
+                const auto numCols = GetMatrix<double>(parameter.Value())->GetNumCols();
+                const auto& smoothedGradientMatrix = GetWritableMatrix<double>(smoothedGradientValue);
+                smoothedGradientMatrix->AdaDeltaFlushState(numCols, (double)m_rho, timestamps, currentTimestamp);
+            }
+            m_currentTime[parameter] = 0;
+        }
+        return LearnerBase::CreateCheckpoint();
+    }
+
+    /*virtual*/ void LearnerAdaDelta::RestoreFromCheckpoint(const Dictionary& checkpoint) /*override*/
+    {
+        LearnerBase::RestoreFromCheckpoint(checkpoint);
+        for (const auto& parameter : Parameters())
+        {
+            const auto search = m_lastUpdateTime.find(parameter);
+            if (search == m_lastUpdateTime.end())
+                continue;
+            m_currentTime[parameter] = 0;
+            search->second->SetValue(0.0f);
+        }
     }
 
     /*static*/ const double LearnerFSAdaGrad::s_targetAdagradAvDenom = 1.0;
@@ -678,7 +750,7 @@ namespace CNTK
     }
 
     /*virtual*/ void LearnerFSAdaGrad::Update(const Parameter& parameter, const NDArrayViewPtr& gradientValue, 
-                                              const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount) const /*override*/
+                                              const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount) /*override*/
     {
         DISPATCH_TO_TYPED_UPDATE_FUNCTION;
     }
@@ -765,7 +837,7 @@ namespace CNTK
     }
 
     /*virtual*/ void LearnerAdam::Update(const Parameter& parameter, const NDArrayViewPtr& gradientValue,
-        const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount) const /*override*/
+        const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount) /*override*/
     {
         DISPATCH_TO_TYPED_UPDATE_FUNCTION;
     }
@@ -828,7 +900,7 @@ namespace CNTK
     }
 
     /*virtual*/ void LearnerRMSProp::Update(const Parameter& parameter, const NDArrayViewPtr& gradientValue, 
-                                            const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount) const /*override*/
+                                            const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount) /*override*/
     {
         DISPATCH_TO_TYPED_UPDATE_FUNCTION;
     }
@@ -1051,7 +1123,7 @@ namespace CNTK
     }
 
     /*virtual*/ void LearnerUniversal::Update(const Parameter& parameter, const NDArrayViewPtr& gradientValue,
-        const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount) const /*override*/
+        const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount) /*override*/
     {
         LogicError("Shouldn't trigger single element update in universal learner.");
     }

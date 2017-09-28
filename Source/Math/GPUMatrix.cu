@@ -1671,6 +1671,15 @@ void GPUMatrix<ElemType>::AdaDelta(GPUMatrix<ElemType>& gradients, GPUMatrix<Ele
 }
 
 template <class ElemType>
+void GPUMatrix<ElemType>::AdaDeltaFlushTimestamps(size_t stride, ElemType rho, int* timestamps, int currentTimestamp)
+{
+    size_t n = stride;
+    size_t rows = GetNumRows();
+    int blocksPerGrid = (n + GridDim::maxThreadsPerBlock - 1) / GridDim::maxThreadsPerBlock;
+    _adadeltaflush<ElemType> << <blocksPerGrid, GridDim::maxThreadsPerBlock >> > (n, rows, Data(), Data() + stride, rho, timestamps, currentTimestamp);
+}
+
+template <class ElemType>
 void GPUMatrix<ElemType>::Reshape(const size_t numRows, const size_t numCols)
 {
     assert(numRows * numCols == GetNumElements());

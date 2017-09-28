@@ -1485,6 +1485,27 @@ void CPUMatrix<ElemType>::AdaDelta(CPUMatrix<ElemType>& gradients, CPUMatrix<Ele
 }
 
 template <class ElemType>
+void CPUMatrix<ElemType>::AdaDeltaFlushTimestamps(size_t stride, ElemType rho, int* timestamps, int currentTimestamp)
+{
+    auto rows = GetNumRows();
+    auto cols = stride;
+    auto smoothAda = Data();
+    auto smoothX2 = Data() + stride;
+#pragma omp parallel for
+    for (auto col = 0; col < cols; ++col)
+    {
+        auto decay = std::pow(rho, ElemType(currentTimestamp - timestamps[col]));
+        auto offset = rows * col;
+        timestamps[col] = 0;
+        for (auto row = 0; row < rows; ++row)
+        {
+            smoothAda[offset + row] *= decay;
+            smoothX2[offset + row] *= decay;
+        }
+    }
+}
+
+template <class ElemType>
 void CPUMatrix<ElemType>::Reshape(const size_t numRows, const size_t numCols)
 {
     if (numRows * numCols != GetNumElements())

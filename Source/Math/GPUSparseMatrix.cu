@@ -1759,7 +1759,7 @@ ElemType GPUSparseMatrix<ElemType>::RmsProp(GPUMatrix<ElemType>& c,
 }
 
 template <class ElemType>
-void GPUSparseMatrix<ElemType>::AdaDelta(GPUMatrix<ElemType>&c, GPUMatrix<ElemType>&functionValues, ElemType learningRate, ElemType rho, ElemType epsilon)
+void GPUSparseMatrix<ElemType>::AdaDelta(GPUMatrix<ElemType>&c, GPUMatrix<ElemType>&functionValues, ElemType learningRate, ElemType rho, ElemType epsilon, int* timestamps, int currentTimestamp)
 {
     if (GetFormat() != MatrixFormat::matrixFormatSparseBlockCol)
     {
@@ -1776,12 +1776,13 @@ void GPUSparseMatrix<ElemType>::AdaDelta(GPUMatrix<ElemType>&c, GPUMatrix<ElemTy
 
     assert((c.GetNumRows() == GetNumRows()) && (c.GetNumCols() == numColsNeeded));
 
-    size_t n = GetNumElements();
+    size_t n = GetBlockSize();
+    size_t N = GetNumElements();
     int blocksPerGrid = (n + GridDim::maxThreadsPerBlock - 1) / GridDim::maxThreadsPerBlock;
     _adadelta4BlockSparseCol<ElemType> << <blocksPerGrid, GridDim::maxThreadsPerBlock >> >(
-        n, Data(), ColOrRow2BlockId(), GetNumRows(),
-        c.Data(), c.Data() + n, functionValues.Data(),
-        learningRate, rho, epsilon);
+        n, Data(), BlockId2ColOrRow(), GetNumRows(),
+        c.Data(), c.Data() + N, functionValues.Data(), 
+        learningRate, rho, epsilon, timestamps, currentTimestamp);
 }
 
 // sparse X dense = dense

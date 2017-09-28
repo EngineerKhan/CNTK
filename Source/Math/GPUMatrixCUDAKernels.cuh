@@ -5415,18 +5415,28 @@ __global__ void _adadelta(CUDA_LONG size, ElemType* grad, ElemType* smoothAda, E
 
 template <class ElemType>
 __global__ void _adadelta4BlockSparseCol(CUDA_LONG size,
-    ElemType* grad_bsc, const GPUSPARSE_INDEX_TYPE* colOrRow2blockId, const size_t len,
+    ElemType* grad_bsc, const GPUSPARSE_INDEX_TYPE* blockId2ColOrRow, const size_t numRows,
     ElemType* smoothAda, ElemType* smoothX2, ElemType* val,
-    ElemType learningRate, ElemType rho, ElemType epsilon)
+    ElemType learningRate, ElemType rho, ElemType epsilon, 
+    int* timestamps, int currentTimestamp)
 {
-    CUDA_LONG idx = blockIdx.x * blockDim.x + threadIdx.x;
-    CUDA_LONG stride = blockDim.x * gridDim.x;
-    for (; idx < size; idx += stride)
+    CUDA_LONG blockid = blockDim.x * blockIdx.x + threadIdx.x;
+    if (blockid >= size)
+        return;
+
+    CUDA_LONG col = blockId2ColOrRow[blockid];
+
+    auto decay = pow_(rho, currentTimestamp - 1 - timestamps[col]);
+    timestamps[col] = currentTimestamp;
+    auto columnOffset = col * numRows;
+    auto blockOffset = blockid * numRows;
+    for (auto row = 0; row < numRows; ++row)
     {
-        ElemType g = _getvalue4BlockSparseCol(grad_bsc, colOrRow2blockId, len, idx);
-        ElemType adaSqr = rho * smoothAda[idx] + (1.0f - rho) * g * g;
+        auto idx = columnOffset + row;
+        ElemType g = grad_bsc[blockOffset + row];
+        ElemType adaSqr = rho * decay * smoothAda[idx] + (1.0f - rho) * g * g;
         smoothAda[idx] = adaSqr;
-        ElemType x2 = smoothX2[idx];
+        ElemType x2 = decay * smoothX2[idx];
         ElemType deltaX;
         if (sizeof(ElemType) == sizeof(double))
         {
@@ -5436,9 +5446,27 @@ __global__ void _adadelta4BlockSparseCol(CUDA_LONG size,
         {
             deltaX = -sqrtf(x2 + epsilon) * rsqrtf(adaSqr + epsilon) * g;
         }
-
-        smoothX2[idx] = rho * smoothX2[idx] + (1.0f - rho) * deltaX * deltaX;
+        smoothX2[idx] = rho * x2 + (1.0f - rho) * deltaX * deltaX;
         val[idx] += learningRate * deltaX;
+    }
+}
+
+
+template <class ElemType>
+__global__ void _adadeltaflush(CUDA_LONG N, size_t rows, ElemType* smoothAda, ElemType* smoothX2, 
+    ElemType rho, int* timestamps, int currentTimestamp)
+{
+    auto col = blockIdx.x * blockDim.x + threadIdx.x;
+    if (col >= N)
+        return;
+    
+    auto decay = pow_(rho, currentTimestamp - timestamps[col]);
+    auto offset = rows * col;
+    timestamps[col] = 0;
+    for (auto row = 0; row < rows; ++row)
+    {
+        smoothAda[offset + row] *= decay;
+        smoothX2[offset + row] *= decay;
     }
 }
 
