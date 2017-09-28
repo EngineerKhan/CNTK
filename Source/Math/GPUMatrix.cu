@@ -28,6 +28,7 @@
 #include "Convolution.cuh"
 #include "CuDnnRNN.h"
 
+
 #pragma comment(lib, "cudart.lib") // instruct linker to reference these libs
 #pragma comment(lib, "cublas.lib")
 #pragma comment(lib, "cusparse.lib")
@@ -1676,7 +1677,7 @@ void GPUMatrix<ElemType>::AdaDeltaFlushTimestamps(size_t stride, ElemType rho, i
     size_t n = stride;
     size_t rows = GetNumRows();
     int blocksPerGrid = (n + GridDim::maxThreadsPerBlock - 1) / GridDim::maxThreadsPerBlock;
-    _adadeltaflush<ElemType> << <blocksPerGrid, GridDim::maxThreadsPerBlock >> > (n, rows, Data(), Data() + stride, rho, timestamps, currentTimestamp);
+    _adadeltaFlush<ElemType> << <blocksPerGrid, GridDim::maxThreadsPerBlock >> > (n, rows, Data(), Data() + stride, rho, timestamps, currentTimestamp);
 }
 
 template <class ElemType>

@@ -51,13 +51,14 @@ MOMENTUM_SCHEDULE_PARAMS = [
         
 LEARNER_LAMBDAS = [
     lambda params: C.adadelta(params),
-    lambda params: C.adagrad(params, lr=learning_rate_schedule(1, UnitType.minibatch)),
+#    lambda params: C.adagrad(params, lr=learning_rate_schedule(1, UnitType.minibatch)),
     lambda params: C.adam(params, lr=learning_rate_schedule(1, UnitType.minibatch), momentum=C.momentum_schedule(0.9)),
     lambda params: C.fsadagrad(params, lr=learning_rate_schedule(1, UnitType.minibatch), momentum=C.momentum_schedule(0.9)),
-    lambda params: C.nesterov(params, lr=learning_rate_schedule(1, UnitType.minibatch), momentum=C.momentum_schedule(0.9)),
+#    lambda params: C.nesterov(params, lr=learning_rate_schedule(1, UnitType.minibatch), momentum=C.momentum_schedule(0.9)),
     lambda params: C.rmsprop(params, lr=learning_rate_schedule(1, UnitType.minibatch), gamma=0.1, inc=3.0, dec=0.1, max=np.inf, min=1e-8),
     lambda params: C.sgd(params, lr=learning_rate_schedule(1, UnitType.minibatch)),
-    lambda params: C.momentum_sgd(params, lr=learning_rate_schedule(1, UnitType.minibatch), momentum=C.momentum_schedule(0.9))]
+#    lambda params: C.momentum_sgd(params, lr=learning_rate_schedule(1, UnitType.minibatch), momentum=C.momentum_schedule(0.9))
+    ]
 
 @pytest.mark.parametrize("params, expectation, minibatch_size", LR_SCHEDULE_PARAMS_LEGACY)
 def test_learning_rate_schedule(params, expectation, minibatch_size):
@@ -728,3 +729,72 @@ def test_restore_from_checkpoint(tmpdir, learner):
     last_avg_err2, avg_err2, _ = ffnet(None, trainer2)
     assert np.allclose(last_avg_err1, last_avg_err2)
     assert np.allclose(avg_err1, avg_err2)
+
+# The following learners work the same with sparse and dense gradients
+# After this is resolved: https://github.com/Microsoft/CNTK/issues/2411
+# this should be replaced with LEARNER_LAMBDAS
+SPARSE_AND_DENSE_LEARNER_LAMBDAS = [
+    lambda params: C.adadelta(params),
+    lambda params: C.adam(params, lr=learning_rate_schedule(1, UnitType.minibatch), momentum=C.momentum_schedule(0.9)),
+    lambda params: C.fsadagrad(params, lr=learning_rate_schedule(1, UnitType.minibatch), momentum=C.momentum_schedule(0.9)),
+    lambda params: C.rmsprop(params, lr=learning_rate_schedule(1, UnitType.minibatch), gamma=0.1, inc=3.0, dec=0.1, max=np.inf, min=1e-8),
+    lambda params: C.sgd(params, lr=learning_rate_schedule(1, UnitType.minibatch))]
+
+@pytest.mark.parametrize("learner", SPARSE_AND_DENSE_LEARNER_LAMBDAS)
+def test_sparse_vs_dense_updates(learner):
+
+    def session(is_sparse):
+        x = C.input_variable((2,), is_sparse=is_sparse)
+        w = C.parameter((2, 1))
+        y = C.times(x, w)
+
+        import scipy.sparse
+        x11 = scipy.sparse.csr_matrix(np.array([1, 1]).astype('f'))
+        x01 = scipy.sparse.csr_matrix(np.array([0, 1]).astype('f'))
+
+        t = C.Trainer(y, y, learner(y.parameters))
+
+        w.value = 0 * w.value
+        t.train_minibatch({x: [x11]})
+        t.train_minibatch({x: [x01]})
+        t.train_minibatch({x: [x01]})
+        t.train_minibatch({x: [x01]})
+        t.train_minibatch({x: [x01]})
+        t.train_minibatch({x: [x11]})
+        return w.value
+
+    s = session(is_sparse=False)
+    d = session(is_sparse=True)
+    assert(np.allclose(s, d))
+
+@pytest.mark.parametrize("learner", SPARSE_AND_DENSE_LEARNER_LAMBDAS)
+def test_sparse_vs_dense_updates_with_checkpoint(tmpdir, learner):
+
+    def session(is_sparse):
+        x = C.input_variable((2,), is_sparse=is_sparse)
+        w = C.parameter((2, 1))
+        y = C.times(x, w)
+
+        import scipy.sparse
+        x11 = scipy.sparse.csr_matrix(np.array([1, 1]).astype('f'))
+        x01 = scipy.sparse.csr_matrix(np.array([0, 1]).astype('f'))
+
+        t = C.Trainer(y, y, learner(y.parameters))
+
+        w.value = 0 * w.value
+        t.train_minibatch({x: [x11]})
+        t.train_minibatch({x: [x01]})
+        t.train_minibatch({x: [x01]})
+        t.save_checkpoint(str(tmpdir.join('checkpoint')))
+        t.train_minibatch({x: [x11]})
+        t.train_minibatch({x: [x01]})
+        t.train_minibatch({x: [x01]})
+        t.restore_from_checkpoint(str(tmpdir.join('checkpoint')))
+        t.train_minibatch({x: [x01]})
+        t.train_minibatch({x: [x01]})
+        t.train_minibatch({x: [x11]})
+        return w.value
+
+    s = session(is_sparse=False)
+    d = session(is_sparse=True)
+    assert(np.allclose(s, d))

@@ -5197,7 +5197,7 @@ __global__ void _DropFrame(
     for (long i = 0; i < m_numRows; ++i)
     {
         int idx = IDX2C(i, col_id, m_numRows);
-        // printf("%u ", idx);
+        // printf("%u ", denseIndex);
         if (fabs(label[idx] - 1.0) < 0.1) // we found the 1 in the vector
         {
             if (gamma[idx] < framedropthreshhold)
@@ -5415,45 +5415,38 @@ __global__ void _adadelta(CUDA_LONG size, ElemType* grad, ElemType* smoothAda, E
 
 template <class ElemType>
 __global__ void _adadelta4BlockSparseCol(CUDA_LONG size,
-    ElemType* grad_bsc, const GPUSPARSE_INDEX_TYPE* blockId2ColOrRow, const size_t numRows,
+    const ElemType* grad_bsc, const GPUSPARSE_INDEX_TYPE* blockId2ColOrRow, size_t numRows,
     ElemType* smoothAda, ElemType* smoothX2, ElemType* val,
     ElemType learningRate, ElemType rho, ElemType epsilon, 
-    int* timestamps, int currentTimestamp)
+    const int* timestamps, int currentTimestamp)
 {
-    CUDA_LONG blockid = blockDim.x * blockIdx.x + threadIdx.x;
-    if (blockid >= size)
+    auto sparseIndex = blockDim.x * blockIdx.x + threadIdx.x;
+    if (sparseIndex >= size)
         return;
-
-    CUDA_LONG col = blockId2ColOrRow[blockid];
-
+    auto blockid = sparseIndex / numRows;
+    auto col = blockId2ColOrRow[blockid];
     auto decay = pow_(rho, currentTimestamp - 1 - timestamps[col]);
-    timestamps[col] = currentTimestamp;
-    auto columnOffset = col * numRows;
-    auto blockOffset = blockid * numRows;
-    for (auto row = 0; row < numRows; ++row)
+    auto denseIndex = col * numRows + sparseIndex % numRows;
+    ElemType g = grad_bsc[sparseIndex];
+    ElemType adaSqr = rho * decay * smoothAda[denseIndex] + (1.0f - rho) * g * g;
+    smoothAda[denseIndex] = adaSqr;
+    ElemType x2 = decay * smoothX2[denseIndex];
+    ElemType deltaX;
+    if (sizeof(ElemType) == sizeof(double))
     {
-        auto idx = columnOffset + row;
-        ElemType g = grad_bsc[blockOffset + row];
-        ElemType adaSqr = rho * decay * smoothAda[idx] + (1.0f - rho) * g * g;
-        smoothAda[idx] = adaSqr;
-        ElemType x2 = decay * smoothX2[idx];
-        ElemType deltaX;
-        if (sizeof(ElemType) == sizeof(double))
-        {
-            deltaX = -sqrt(x2 + epsilon) * rsqrt(adaSqr + epsilon) * g;
-        }
-        else
-        {
-            deltaX = -sqrtf(x2 + epsilon) * rsqrtf(adaSqr + epsilon) * g;
-        }
-        smoothX2[idx] = rho * x2 + (1.0f - rho) * deltaX * deltaX;
-        val[idx] += learningRate * deltaX;
+        deltaX = -sqrt(x2 + epsilon) * rsqrt(adaSqr + epsilon) * g;
     }
+    else
+    {
+        deltaX = -sqrtf(x2 + epsilon) * rsqrtf(adaSqr + epsilon) * g;
+    }
+    smoothX2[denseIndex] = rho * x2 + (1.0f - rho) * deltaX * deltaX;
+    val[denseIndex] += learningRate * deltaX;
 }
 
 
 template <class ElemType>
-__global__ void _adadeltaflush(CUDA_LONG N, size_t rows, ElemType* smoothAda, ElemType* smoothX2, 
+__global__ void _adadeltaFlush(CUDA_LONG N, size_t rows, ElemType* smoothAda, ElemType* smoothX2, 
     ElemType rho, int* timestamps, int currentTimestamp)
 {
     auto col = blockIdx.x * blockDim.x + threadIdx.x;
@@ -5469,6 +5462,7 @@ __global__ void _adadeltaflush(CUDA_LONG N, size_t rows, ElemType* smoothAda, El
         smoothX2[offset + row] *= decay;
     }
 }
+
 
 // Calculate alpha in forward-backward calculation. equation (6), (7) in ftp://ftp.idsia.ch/pub/juergen/icml2006.pdf
 // GPU x dimension corresponds to utterances, y dimension corresponds to phone sequence in each utterance
