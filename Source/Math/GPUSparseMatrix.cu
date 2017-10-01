@@ -1758,8 +1758,7 @@ ElemType GPUSparseMatrix<ElemType>::RmsProp(GPUMatrix<ElemType>& c,
     }
 }
 
-//template <class ElemType>
-__global__ void _updateTimestamps(CUDA_LONG N, const GPUSPARSE_INDEX_TYPE* blockId2ColOrRow, int* timestamps, int currentTimestamp) //, ElemType dummy=ElemType(0))
+__global__ void _updateTimestamps(CUDA_LONG N, const GPUSPARSE_INDEX_TYPE* blockId2ColOrRow, int* timestamps, int currentTimestamp)
 {
     auto blockid = blockIdx.x * blockDim.x + threadIdx.x;
     if (blockid >= N)

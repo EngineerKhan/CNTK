@@ -1867,13 +1867,13 @@ void Matrix<ElemType>::AdaDeltaUpdate(Matrix<ElemType>& gradients,
 }
 
 template <class ElemType>
-void Matrix<ElemType>::AdaDeltaFlushState(size_t stride, ElemType rho, int* timestamps, int currentTimestamp)
+void Matrix<ElemType>::AdaDeltaFlushState(size_t cols, ElemType rho, int* timestamps, int currentTimestamp)
 {
     DecideAndMoveToRightDevice(*this, *this);
 
     DISPATCH_MATRIX_ON_FLAG(this, this,
-    { m_CPUMatrix->AdaDeltaFlushTimestamps(stride, rho, timestamps, currentTimestamp); SetDataLocation(CPU); },
-    { m_GPUMatrix->AdaDeltaFlushTimestamps(stride, rho, timestamps, currentTimestamp); SetDataLocation(GPU); },
+    { m_CPUMatrix->AdaDeltaFlushTimestamps(cols, rho, timestamps, currentTimestamp); SetDataLocation(CPU); },
+    { m_GPUMatrix->AdaDeltaFlushTimestamps(cols, rho, timestamps, currentTimestamp); SetDataLocation(GPU); },
     { NOT_IMPLEMENTED; },
     { NOT_IMPLEMENTED; });
 }

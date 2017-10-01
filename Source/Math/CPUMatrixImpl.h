@@ -1485,12 +1485,15 @@ void CPUMatrix<ElemType>::AdaDelta(CPUMatrix<ElemType>& gradients, CPUMatrix<Ele
 }
 
 template <class ElemType>
-void CPUMatrix<ElemType>::AdaDeltaFlushTimestamps(size_t stride, ElemType rho, int* timestamps, int currentTimestamp)
+void CPUMatrix<ElemType>::AdaDeltaFlushTimestamps(size_t cols, ElemType rho, int* timestamps, int currentTimestamp)
 {
+    // Sets all timestamps to 0 and updates the two logical buffers that this object holds
+    // so that their values are the same as if a dense implementation of adadelta had been used.
+    // This basically means that the values of these buffers are set to decay * original value 
+    // where decay is rho ** (currentTimestamp - timestamp for that column)
     auto rows = GetNumRows();
-    auto cols = stride;
     auto smoothAda = Data();
-    auto smoothX2 = Data() + stride;
+    auto smoothX2 = Data() + cols * rows;
 #pragma omp parallel for
     for (auto col = 0; col < cols; ++col)
     {

@@ -1155,6 +1155,11 @@ void GPUMatrix<ElemType>::AdaDelta(GPUMatrix<ElemType>& gradients, GPUMatrix<Ele
 }
 
 template <class ElemType>
+void GPUMatrix<ElemType>::AdaDeltaFlushTimestamps(size_t cols, ElemType rho, int* timestamps, int currentTimestamp)
+{
+}
+
+template <class ElemType>
 void GPUMatrix<ElemType>::Reshape(const size_t numRows, const size_t numCols)
 {
 }

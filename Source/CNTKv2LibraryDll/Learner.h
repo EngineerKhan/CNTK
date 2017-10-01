@@ -251,11 +251,17 @@ namespace CNTK
             AdditionalLearningOptions additionalOptions);
 
     protected:
+        // If a gradient is sparse, we skip updating columns with zero gradients. This means some 
+        // columns will receive their updates when their gradient is non-zero. The only exception
+        // is that once every s_SyncInterval updates we will make sure all columns are up to date. 
         static const int s_SyncInterval;
 
         double m_rho;
         double m_epsilon;
+        // If a gradient is sparse, we will maintain a timestamp per column with the last time that column was updated
         std::unordered_map<Parameter, NDArrayViewPtr> m_lastUpdateTime;
+        // If a gradient is sparse we will use the current time and the timestamp to determine how to apply a bunch of delayed updates for this column.
+        // This allows us to skip updating many columns when the gradients are sparse.
         std::unordered_map<Parameter, int> m_currentTime;
 
         virtual void Update(const Parameter& parameter, const NDArrayViewPtr& gradientValue, const NDArrayViewPtr& smoothedGradientValue, size_t trainingSampleCount) override;
